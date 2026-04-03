@@ -44,7 +44,7 @@ db = init_db()
 # --- AGENT LOGIC ---
 if groq_key:
     try:
-        llm = ChatGroq(groq_api_key=groq_key, model="llama3-70b-8192", temperature=0)
+        llm = ChatGroq(groq_api_key=groq_key, model="llama3-8b-8192", temperature=0)
         agent_executor = create_sql_agent(llm, db=db, agent_type="tool-calling", verbose=True)
 
         query = st.text_input("Search Candidates:", placeholder="e.g., Find a dev with 5+ years experience")
