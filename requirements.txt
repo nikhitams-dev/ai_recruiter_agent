@@ -1,4 +1,8 @@
 streamlit
-langchain-openai
-python-dotenv
-PyPDF2
+langchain
+langchain-groq
+langchain-community
+chromadb
+beautifulsoup4
+pysqlite3-binary
+sentence-transformers
