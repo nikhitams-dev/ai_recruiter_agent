@@ -1,79 +1,63 @@
 import streamlit as st
-from PyPDF2 import PdfReader
-from langchain_openai import ChatOpenAI
-from dotenv import load_dotenv
 import os
-import sqlite3  # <--- Added for the Database requirement
-import pandas as pd
+import sqlite3
+import sys
 
-# 1. Setup & API Key
-load_dotenv()
-api_key = os.getenv("OPENAI_API_KEY")
+# FIX: Force Streamlit to use a modern SQLite version
+try:
+    __import__('pysqlite3')
+    sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+except ImportError:
+    pass
 
-# 2. Initialize SQLite Database (Checklist Item: Create basic candidate database)
+from langchain_groq import ChatGroq
+from langchain_community.utilities import SQLDatabase
+from langchain_community.agent_toolkits import create_sql_agent
+
+st.set_page_config(page_title="AI Recruiter Agent", page_icon="🤖")
+st.title("🤖 AI Recruiter Agent (Week 2)")
+
+# Sidebar for API Key
+with st.sidebar:
+    st.header("Settings")
+    groq_key = st.text_input("Enter Groq API Key", type="password")
+    st.info("Get your free key at: ://groq.com")
+
+# --- DATABASE SETUP ---
 def init_db():
-    conn = sqlite3.connect('candidates.db')
+    conn = sqlite3.connect('recruiter.db')
     c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS results 
-                 (name TEXT, score INTEGER, keywords TEXT, summary TEXT)''')
+    c.execute('DROP TABLE IF EXISTS candidates')
+    c.execute('CREATE TABLE candidates (id INTEGER, name TEXT, role TEXT, exp INTEGER, skills TEXT)')
+    candidates = [
+        (1, 'Alice Johnson', 'Python Developer', 5, 'Python, Django, SQL'),
+        (2, 'Mark Chen', 'Frontend Engineer', 3, 'React, Tailwind, JS'),
+        (3, 'Sarah Miller', 'AI Engineer', 2, 'LangChain, Groq, Python')
+    ]
+    c.executemany('INSERT INTO candidates VALUES (?,?,?,?,?)', candidates)
     conn.commit()
     conn.close()
+    return SQLDatabase.from_uri("sqlite:///recruiter.db")
 
-def save_to_db(name, score, keywords, summary):
-    conn = sqlite3.connect('candidates.db')
-    c = conn.cursor()
-    c.execute("INSERT INTO results VALUES (?,?,?,?)", (name, score, keywords, summary))
-    conn.commit()
-    conn.close()
+db = init_db()
 
-def main():
-    init_db()
-    st.set_page_config(page_title="AI Talent Scout Pro", page_icon="🤖")
-    st.header("AI Talent Scout: Week 1-2 Foundation 🚀")
+# --- AGENT LOGIC ---
+if groq_key:
+    try:
+        llm = ChatGroq(groq_api_key=groq_key, model="llama3-70b-8192", temperature=0)
+        agent_executor = create_sql_agent(llm, db=db, agent_type="tool-calling", verbose=True)
 
-    # Sidebar: History (Checklist Item: Candidate Database)
-    with st.sidebar:
-        st.title("Candidate History")
-        if st.button("View Scanned Candidates"):
-            conn = sqlite3.connect('candidates.db')
-            df = pd.read_sql_query("SELECT * FROM results", conn)
-            st.dataframe(df)
-            conn.close()
+        query = st.text_input("Search Candidates:", placeholder="e.g., Find a dev with 5+ years experience")
 
-    # Inputs
-    jd = st.text_area("Paste Job Description (JD)")
-    pdf = st.file_uploader("Upload Resume (PDF)", type="pdf")
+        if query:
+            with st.spinner("Agent is thinking..."):
+                response = agent_executor.invoke({"input": query})
+                st.success("Analysis Complete:")
+                st.write(response["output"])
+    except Exception as e:
+        st.error(f"Error: {e}")
+else:
+    st.warning("👈 Please enter your Groq API Key in the sidebar!")
 
-    if st.button("Analyze & Save Candidate"):
-        if pdf and jd:
-            with st.spinner("Parsing & Scoring..."):
-                # PDF Text Extraction
-                reader = PdfReader(pdf)
-                resume_text = "".join([p.extract_text() for p in reader.pages])
-
-                # AI Logic (Checklist Item: Keyword Extraction & Scoring)
-                llm = ChatOpenAI(model="gpt-4o-mini", openai_api_key=api_key)
-                prompt = f"""
-                Analyze this Resume vs JD.
-                JD: {jd}
-                Resume: {resume_text}
-
-                Provide ONLY a JSON-like format:
-                - Score: [0-100]
-                - KeywordsFound: [list top 5 skills found]
-                - Summary: [1 sentence]
-                """
+ 
                 
-                response = llm.invoke(prompt).content
-                
-                # Display Results
-                st.success("Analysis Complete & Saved to Database!")
-                st.write(response)
-                
-                # Save to DB (Example: Using file name as candidate name)
-                save_to_db(pdf.name, 85, "Python, SQL, React", response) # Simplified for demo
-        else:
-            st.warning("Please upload a file and JD.")
-
-if __name__ == "__main__":
-    main()
